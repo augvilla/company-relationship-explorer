@@ -273,12 +273,14 @@ def fetch_relationships(company_name: str, ticker: str, sector: str, industry: s
             },
             json={
                 "model": "claude-sonnet-5",
-                "max_tokens": 600,
+                "max_tokens": 2048,
+                "thinking": {"type": "disabled"},
                 "messages": [{"role": "user", "content": prompt}],
             },
             timeout=30,
         )
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            return {"error": True, "detail": f"HTTP {resp.status_code}: {resp.text[:300]}"}
         data = resp.json()
         text = "".join(
             block.get("text", "") for block in data.get("content", [])
@@ -288,14 +290,16 @@ def fetch_relationships(company_name: str, ticker: str, sector: str, industry: s
             text = text.strip("`")
             if "\n" in text:
                 text = text.split("\n", 1)[1]
+        if not text:
+            return {"error": True, "detail": "Empty response from the model (no text content returned)."}
         parsed = json.loads(text)
         return {
             "competitors": list(parsed.get("competitors", []))[:5],
             "suppliers": list(parsed.get("suppliers", []))[:5],
             "customers": list(parsed.get("customers", []))[:5],
         }
-    except Exception:
-        return {"error": True}
+    except Exception as e:
+        return {"error": True, "detail": f"{type(e).__name__}: {e}"}
 
 
 def render_rel_column(title: str, items):
@@ -372,7 +376,9 @@ if run:
             "COMPETITOR / SUPPLIER / CUSTOMER LOOKUP."
         )
     elif rel.get("error"):
-        st.warning("COULD NOT GENERATE RELATIONSHIP DATA RIGHT NOW — TRY AGAIN.")
+        st.warning("COULD NOT GENERATE RELATIONSHIP DATA RIGHT NOW.")
+        if rel.get("detail"):
+            st.caption(f"DETAIL: {rel['detail']}")
     else:
         col_left, col_center, col_right = st.columns(3)
         with col_left:
