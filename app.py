@@ -401,18 +401,25 @@ def build_tree_diagram(center, suppliers, competitors, customers):
     BOX_H = 1.9
 
     # Center box
-    cx0, cx1, cy0, cy1 = 4.1, 6.1, 4.05, 6.15
+    MID_Y = 5.6
+    cx0, cx1 = 4.1, 6.1
+    cy0, cy1 = MID_Y - 1.05, MID_Y + 1.05
     center_color = change_to_color(center["change_pct"])
     add_box(cx0, cx1, cy0, cy1, center_color, center["ticker"], center["name"], center["change_pct"], font_size=12)
 
     box_w, gap = 2.3, 0.4
+
+    max_side_n = max(len(suppliers), len(customers), 1)
+    side_span = max_side_n * BOX_H + (max_side_n - 1) * gap
+    side_top = MID_Y + side_span / 2
+    side_bottom = MID_Y - side_span / 2
 
     def side_column(items, x0, x1, align_right_edge_to_center):
         n = len(items)
         if n == 0:
             return
         total_h = n * BOX_H + (n - 1) * gap
-        y_top = 5.1 + total_h / 2
+        y_top = MID_Y + total_h / 2
         for i, item in enumerate(items):
             y1 = y_top - i * (BOX_H + gap)
             y0 = y1 - BOX_H
@@ -425,30 +432,32 @@ def build_tree_diagram(center, suppliers, competitors, customers):
     side_column(suppliers, 0.0, box_w, True)
     side_column(customers, 10.2 - box_w, 10.2, False)
 
-    # Competitors row below center
+    # Competitors row — always placed below wherever the tallest side
+    # column actually ends, so it can never collide regardless of count.
     n = len(competitors)
     comp_w = 2.1
     comp_gap = 0.35
+    row_gap = 1.1
+    comp_top = side_bottom - row_gap
+    comp_bottom = comp_top - BOX_H
     if n:
         total_w = n * comp_w + (n - 1) * comp_gap
         x_start = 5.1 - total_w / 2
-        y0, y1 = 0.3, 0.3 + BOX_H
         for i, item in enumerate(competitors):
             x0 = x_start + i * (comp_w + comp_gap)
             x1 = x0 + comp_w
             color = change_to_color(item["change_pct"])
-            add_box(x0, x1, y0, y1, color, item["ticker"], item["name"], item["change_pct"])
-            add_connector((x0 + x1) / 2, y1, (cx0 + cx1) / 2, cy0)
-        comp_bottom = y0
+            add_box(x0, x1, comp_bottom, comp_top, color, item["ticker"], item["name"], item["change_pct"])
+            add_connector((x0 + x1) / 2, comp_top, (cx0 + cx1) / 2, cy0)
     else:
-        comp_bottom = 2.2
+        x_start, total_w = 5.1, 0
 
     fig.update_layout(
         shapes=shapes,
         annotations=annotations,
         xaxis=dict(visible=False, range=[min(-0.2, x_start - 0.2 if n else -0.2),
                                           max(10.4, x_start + total_w + 0.2 if n else 10.4)]),
-        yaxis=dict(visible=False, range=[comp_bottom - 0.7, 9.6]),
+        yaxis=dict(visible=False, range=[comp_bottom - 0.7, side_top + 0.6]),
         height=700,
         paper_bgcolor="#000000",
         plot_bgcolor="#000000",
@@ -457,9 +466,9 @@ def build_tree_diagram(center, suppliers, competitors, customers):
     )
 
     # column headers
-    fig.add_annotation(x=box_w / 2, y=9.3, text="SUPPLIERS", showarrow=False,
+    fig.add_annotation(x=box_w / 2, y=side_top + 0.3, text="SUPPLIERS", showarrow=False,
                         font=dict(family="IBM Plex Mono", color="#FF8C00", size=13))
-    fig.add_annotation(x=10.2 - box_w / 2, y=9.3, text="CUSTOMERS", showarrow=False,
+    fig.add_annotation(x=10.2 - box_w / 2, y=side_top + 0.3, text="CUSTOMERS", showarrow=False,
                         font=dict(family="IBM Plex Mono", color="#FF8C00", size=13))
     fig.add_annotation(x=5.1, y=comp_bottom - 0.4, text="COMPETITORS", showarrow=False,
                         font=dict(family="IBM Plex Mono", color="#FF8C00", size=13))
