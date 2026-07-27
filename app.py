@@ -257,9 +257,9 @@ def fetch_relationships(company_name: str, ticker: str, sector: str, industry: s
     prompt = (
         f'For the publicly traded company "{company_name}" (ticker {ticker}), '
         f"sector: {sector}, industry: {industry}, give your best-informed estimate of:\n"
-        f"1. Its top 5 direct competitors\n"
-        f"2. Its top 5 known suppliers (companies it buys key inputs/components from)\n"
-        f"3. Its top 5 known customers (companies or industries that buy its products/services — "
+        f"1. Its top 10 direct competitors\n"
+        f"2. Its top 10 known suppliers (companies it buys key inputs/components from)\n"
+        f"3. Its top 10 known customers (companies or industries that buy its products/services — "
         f"if it primarily sells to individual consumers rather than businesses, return an empty list here)\n\n"
         f"For each company, include its stock ticker symbol if it is publicly traded (use the primary "
         f"US listing symbol where one exists, e.g. an ADR ticker for a foreign company), or null if it "
@@ -304,7 +304,7 @@ def fetch_relationships(company_name: str, ticker: str, sector: str, industry: s
 
         def _clean(items):
             out = []
-            for it in list(items)[:5]:
+            for it in list(items)[:10]:
                 if isinstance(it, dict):
                     out.append({"name": it.get("name", "?"), "ticker": it.get("ticker") or None})
                 else:
@@ -373,18 +373,19 @@ def _wrap_name(name: str, width: int = 14) -> str:
 
 def build_tree_diagram(center, suppliers, competitors, customers):
     """Node-link diagram: suppliers left, customers right, competitors below,
-    all connected to a central company box, each colored by today's % change."""
+    all connected to a central company box via right-angle spine connectors
+    (no diagonal crossing), each box colored by today's % change."""
     fig = go.Figure()
     shapes = []
     annotations = []
 
-    def add_box(x0, x1, y0, y1, color, ticker, name, change_pct, font_size=11):
+    def add_box(x0, x1, y0, y1, color, ticker, name, change_pct, font_size=9):
         shapes.append(dict(
             type="rect", x0=x0, x1=x1, y0=y0, y1=y1,
-            line=dict(color="#000000", width=2), fillcolor=color,
+            line=dict(color="#000000", width=1.5), fillcolor=color,
         ))
-        change_line = f"{change_pct:+.2f}%" if change_pct is not None else "PRIVATE / N/A"
-        text = f"<b>{ticker or 'N/A'}</b><br>{_wrap_name(name)}<br>{change_line}"
+        change_line = f"{change_pct:+.2f}%" if change_pct is not None else "N/A"
+        text = f"<b>{ticker or 'N/A'}</b><br>{_wrap_name(name, width=13)}<br>{change_line}"
         annotations.append(dict(
             x=(x0 + x1) / 2, y=(y0 + y1) / 2,
             text=text, showarrow=False,
@@ -392,29 +393,28 @@ def build_tree_diagram(center, suppliers, competitors, customers):
             align="center",
         ))
 
-    def add_connector(x0, y0, x1, y1):
+    def add_line(x0, y0, x1, y1):
         shapes.append(dict(
             type="line", x0=x0, y0=y0, x1=x1, y1=y1,
-            line=dict(color="#7A5A2E", width=1.5),
+            line=dict(color="#7A5A2E", width=1.2),
         ))
 
-    BOX_H = 1.9
+    BOX_H = 1.15
+    box_w, gap = 1.9, 0.18
 
     # Center box
-    MID_Y = 5.6
-    cx0, cx1 = 4.1, 6.1
-    cy0, cy1 = MID_Y - 1.05, MID_Y + 1.05
+    MID_Y = 6.2
+    cx0, cx1 = 3.9, 6.3
+    cy0, cy1 = MID_Y - 0.95, MID_Y + 0.95
     center_color = change_to_color(center["change_pct"])
-    add_box(cx0, cx1, cy0, cy1, center_color, center["ticker"], center["name"], center["change_pct"], font_size=12)
-
-    box_w, gap = 2.3, 0.4
+    add_box(cx0, cx1, cy0, cy1, center_color, center["ticker"], center["name"], center["change_pct"], font_size=11)
 
     max_side_n = max(len(suppliers), len(customers), 1)
     side_span = max_side_n * BOX_H + (max_side_n - 1) * gap
     side_top = MID_Y + side_span / 2
     side_bottom = MID_Y - side_span / 2
 
-    def side_column(items, x0, x1, align_right_edge_to_center):
+    def side_column(items, x0, x1, spine_x, is_left):
         n = len(items)
         if n == 0:
             return
@@ -423,32 +423,44 @@ def build_tree_diagram(center, suppliers, competitors, customers):
         for i, item in enumerate(items):
             y1 = y_top - i * (BOX_H + gap)
             y0 = y1 - BOX_H
+            mid_y = (y0 + y1) / 2
             color = change_to_color(item["change_pct"])
             add_box(x0, x1, y0, y1, color, item["ticker"], item["name"], item["change_pct"])
-            conn_x = x1 if align_right_edge_to_center else x0
-            target_x = cx0 if align_right_edge_to_center else cx1
-            add_connector(conn_x, (y0 + y1) / 2, target_x, (cy0 + cy1) / 2)
+            box_edge = x1 if is_left else x0
+            add_line(box_edge, mid_y, spine_x, mid_y)  # box -> spine (horizontal)
+        # single shared vertical spine, plus one connector into the center box
+        add_line(spine_x, y_top - BOX_H / 2, spine_x, y_top - total_h + BOX_H / 2)
+        center_edge = cx0 if is_left else cx1
+        add_line(spine_x, MID_Y, center_edge, MID_Y)
 
-    side_column(suppliers, 0.0, box_w, True)
-    side_column(customers, 10.2 - box_w, 10.2, False)
+    supplier_spine_x = box_w + 0.9
+    customer_spine_x = (10.2 - box_w) - 0.9
+    side_column(suppliers, 0.0, box_w, supplier_spine_x, is_left=True)
+    side_column(customers, 10.2 - box_w, 10.2, customer_spine_x, is_left=False)
 
     # Competitors row — always placed below wherever the tallest side
     # column actually ends, so it can never collide regardless of count.
     n = len(competitors)
-    comp_w = 2.1
-    comp_gap = 0.35
-    row_gap = 1.1
+    comp_w = 1.7
+    comp_gap = 0.15
+    row_gap = 1.3
     comp_top = side_bottom - row_gap
     comp_bottom = comp_top - BOX_H
+    comp_spine_y = comp_top + row_gap / 2
     if n:
         total_w = n * comp_w + (n - 1) * comp_gap
         x_start = 5.1 - total_w / 2
         for i, item in enumerate(competitors):
             x0 = x_start + i * (comp_w + comp_gap)
             x1 = x0 + comp_w
+            mid_x = (x0 + x1) / 2
             color = change_to_color(item["change_pct"])
             add_box(x0, x1, comp_bottom, comp_top, color, item["ticker"], item["name"], item["change_pct"])
-            add_connector((x0 + x1) / 2, comp_top, (cx0 + cx1) / 2, cy0)
+            add_line(mid_x, comp_top, mid_x, comp_spine_y)  # box -> spine (vertical)
+        first_mid = x_start + comp_w / 2
+        last_mid = x_start + (n - 1) * (comp_w + comp_gap) + comp_w / 2
+        add_line(first_mid, comp_spine_y, last_mid, comp_spine_y)  # shared horizontal spine
+        add_line(5.1, comp_spine_y, cx0 + (cx1 - cx0) / 2, cy0)   # spine -> center
     else:
         x_start, total_w = 5.1, 0
 
@@ -458,7 +470,7 @@ def build_tree_diagram(center, suppliers, competitors, customers):
         xaxis=dict(visible=False, range=[min(-0.2, x_start - 0.2 if n else -0.2),
                                           max(10.4, x_start + total_w + 0.2 if n else 10.4)]),
         yaxis=dict(visible=False, range=[comp_bottom - 0.7, side_top + 0.6]),
-        height=700,
+        height=max(700, 90 * max(max_side_n, n)),
         paper_bgcolor="#000000",
         plot_bgcolor="#000000",
         margin=dict(l=10, r=10, t=30, b=10),
@@ -550,6 +562,10 @@ if run:
             for group in ("suppliers", "competitors", "customers"):
                 for item in rel[group]:
                     item["change_pct"] = fetch_change_pct(item["ticker"])
+                rel[group].sort(
+                    key=lambda it: it["change_pct"] if it["change_pct"] is not None else float("-inf"),
+                    reverse=True,
+                )
 
         center = {"name": snap["name"], "ticker": snap["ticker"], "change_pct": snap["change_pct"]}
         fig_tree = build_tree_diagram(center, rel["suppliers"], rel["competitors"], rel["customers"])
